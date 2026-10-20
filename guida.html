@@ -1503,17 +1503,21 @@ function netGround(x,z){
   return Math.min(watGround(x,z,Math.min(rr,cap),onR),hi);
 }
 /* ostacoli solidi: case, alberi e colonne dei luoghi, raccolti per tassello */
-function netHit(px,pz,r){
+function netHit(px,pz,r,height){
+  var hitY=height==null?car.y:height;
   var tx=Math.floor(px/NT),tz=Math.floor(pz/NT),best=null,i,j,k;
   for(i=-1;i<=1;i++)for(j=-1;j<=1;j++){
     var T=netTiles[nk(tx+i,tz+j)];if(!T||!T.obs)continue;
     for(k=0;k<T.obs.length;k++){
-      var o=T.obs[k],dx=px-o[1],dz=pz-o[2];if(Math.abs(dx)>14||Math.abs(dz)>14)continue;
+      var o=T.obs[k],dx=px-o[1],dz=pz-o[2];
+      var extent=o[0]===1?Math.hypot(o[5],o[6]):o[0]===3?Math.hypot(o[5]-o[3],o[6]-o[4])*.5:(o[3]||0);
+      if(Math.abs(dx)>extent+r+.5||Math.abs(dz)>extent+r+.5)continue;
+      if(o[0]===1&&o[7]!=null&&(hitY+1.6<o[7]||hitY>o[8]+.3))continue;
       var nx,nz,pen;
-      if(o[0]===3&&o[7]!=null&&Math.abs(car.y-o[7])>2.5)continue;
-      if(o[0]===2&&o[4]!=null&&Math.abs(car.y-o[4])>2.5)continue;
+      if(o[0]===3&&o[7]!=null&&Math.abs(hitY-o[7])>2.5)continue;
+      if(o[0]===2&&o[4]!=null&&Math.abs(hitY-o[4])>2.5)continue;
       if(o[0]===3){   /* guard rail: segmento sottile */
-        var sx=o[5]-o[3],sz=o[6]-o[4],L2=sx*sx+sz*sz||1e-9,t=clamp(((px-o[3])*sx+(pz-o[4])*sz)/L2,0,1),ex=px-(o[3]+sx*t),ez=pz-(o[4]+sz*t),d=Math.hypot(ex,ez),rr=r+.15;
+        var sx=o[5]-o[3],sz=o[6]-o[4],L2=sx*sx+sz*sz||1e-9,t=clamp(((px-o[3])*sx+(pz-o[4])*sz)/L2,0,1),ex=px-(o[3]+sx*t),ez=pz-(o[4]+sz*t),d=Math.hypot(ex,ez),rr=r+(o[8]||.15);
         if(d>=rr)continue;pen=rr-d;
         if(d>1e-6){nx=ex/d;nz=ez/d;}else{var Ls=Math.sqrt(L2);nx=-sz/Ls;nz=sx/Ls;}
       }else if(o[0]===1){   /* edificio: rettangolo orientato */
@@ -1551,7 +1555,7 @@ function netProbeY(x,z,y){
   if(on>=0)return{p:on,t:ot,d:Math.sqrt(od),e:P.e[on]};
   return bp<0?null:{p:bp,t:bt,d:Math.sqrt(best),e:P.e[bp]};
 }
-function netY(x,z){var pr=netProbeY(x,z,car.gy!=null&&isFinite(car.gy)?car.gy:null);if(pr&&pr.d<NET.E[pr.e].half+1.5)return netRoadY(pr);return netGround(x,z);}
+function netY(x,z){var pr=netProbeY(x,z,car.gy!=null&&isFinite(car.gy)?car.gy:null);if(pr&&pr.d<NET.E[pr.e].half+1.5)return netRoadY(pr);return terrH(x,z);}
 function netIdx(name){for(var k=0;k<NET.D.length;k++)if(NET.D[k].n===name)return k;return 0;}
 /* strada più vicina a un punto (entro un centinaio di metri) */
 function netProbe(x,z){
@@ -2027,8 +2031,8 @@ var netTerrM=new THREE.MeshLambertMaterial({vertexColors:true,polygonOffset:true
 var TCOLS=[[0,hc(0x52613a)],[350,hc(0x647044)],[700,hc(0x777653)],[1100,hc(0x8b8065)],[1600,hc(0x9a907b)]],TROCK=hc(0x777064),TCa=new THREE.Color();
 /* terreno del tassello: griglia di 20 m con le quote vere, colori per altitudine e pendenza */
 function netTerrain(ox,oz){
-  var S=20,N=NT/S+1,pos=new Float32Array(N*N*3),col=new Float32Array(N*N*3),idx=[],i,j,k;
-  for(j=0;j<N;j++)for(i=0;i<N;i++){k=(j*N+i)*3;pos[k]=i*S;pos[k+1]=netGround(ox+i*S,oz+j*S);pos[k+2]=j*S;}
+  var S=10,N=NT/S+1,pos=new Float32Array(N*N*3),col=new Float32Array(N*N*3),idx=[],i,j,k;
+  for(j=0;j<N;j++)for(i=0;i<N;i++){k=(j*N+i)*3;pos[k]=i*S;pos[k+1]=surfaceCorner(ox+i*S,oz+j*S);pos[k+2]=j*S;}
   for(j=0;j<N-1;j++)for(i=0;i<N-1;i++){var a=j*N+i,b=a+N,c=a+1,d=b+1;idx.push(a,b,c,c,b,d);}
   var g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();
   var nrm=g.attributes.normal.array;
@@ -2088,6 +2092,20 @@ function netTile(tx,tz){
       if(cent.length)for(var sd=Math.ceil(lo/12)*12;sd<hi;sd+=12){
         var u0=(sd-s0)/L,u1=Math.min(t1,(sd+4.5-s0)/L);if(u1<=u0)continue;
         for(i=0;i<cent.length;i++)Q(M,cent[i]-.07,cent[i]+.07,.02,HN.line,u0,u1);
+      }
+      /* Raised urban kerbs: no invisible wall on open verges or junctions. */
+      if(e.cls>=2&&!e.br&&!e.tu&&!e.link&&twp[0]>.35){
+        for(var ks=-1;ks<=1;ks+=2)for(var kr=lo;kr<hi;kr+=4){
+          var ka=(kr-s0)/L,kb=(Math.min(kr+4,hi)-s0)/L,km=(ka+kb)*.5,ko=h+.25;
+          var kx=x0+(x1-x0)*km+(ax+(bx-ax)*km)*ks*ko+ox,kz=z0+(z1-z0)*km+(az+(bz-az)*km)*ks*ko+oz;
+          if(netOnOther(kx,kz,P.e[p],1.2))continue;
+          Q(F,ks*ko-.12,ks*ko+.12,.22,HN.kerbW,ka,kb);
+          var xa=x0+(x1-x0)*ka+(ax+(bx-ax)*ka)*ks*ko,za=z0+(z1-z0)*ka+(az+(bz-az)*ka)*ks*ko;
+          var xb=x0+(x1-x0)*kb+(ax+(bx-ax)*kb)*ks*ko,zb=z0+(z1-z0)*kb+(az+(bz-az)*kb)*ks*ko;
+          var ya=py0+(py1-py0)*ka,yb=py0+(py1-py0)*kb;
+          F.quad([[xa,ya,za],[xb,yb,zb],[xb,yb+.22,zb],[xa,ya+.22,za]],[-ax*ks,0,-az*ks],N4,HN.plinthM);
+          obs.push([3,(xa+xb)/2+ox,(za+zb)/2+oz,xa+ox,za+oz,xb+ox,zb+oz,(ya+yb)*.5,.12]);
+        }
       }
       /* guard rail: niente vicino agli incroci, solo dove il terreno accanto scende */
       var rlo=Math.max(s0,0),rhi=Math.min(s1,e.len-(0));
@@ -2359,6 +2377,28 @@ function netReset(toStart){
   placeCar(x,z,th);car.vx=car.vz=0;car.off=false;car.gy=car.y=netY(car.x,car.z);car.grade=0;
   if(toStart){OX=car.x;OZ=car.z;ridgeX=1e9;netTrack(true);netSync(true);}
   say(toStart?'Di nuovo alla partenza':'Auto rimessa in strada','',2000);
+}
+/* Move in bounded increments and solve contacts against the complete car body. */
+function netMove(dt){
+  var count=Math.max(1,Math.ceil(Math.hypot(car.vx,car.vz)*dt/.35)),sub=dt/count;
+  var sn=Math.sin(car.th),cs=Math.cos(car.th),radius=spec.W*.5+.08;
+  for(var n=0;n<count;n++){
+    car.x+=car.vx*sub;car.z+=car.vz*sub;
+    car.gy=car.y=netY(car.x,car.z);
+    for(var pass=0;pass<3;pass++)for(var k=0;k<3;k++){
+      var off=(k-1)*1.35,h=netHit(car.x+sn*off,car.z+cs*off,radius);
+      if(!h)continue;
+      car.x+=h.nx*(h.pen+.002);car.z+=h.nz*(h.pen+.002);
+      var vn=car.vx*h.nx+car.vz*h.nz;
+      if(vn<0){
+        car.vx-=1.2*vn*h.nx;car.vz-=1.2*vn*h.nz;
+        var friction=1-Math.min(.22,-vn*.025);car.vx*=friction;car.vz*=friction;
+        car.w-=clamp(off*(cs*h.nx-sn*h.nz)*-vn*.035,-.45,.45);
+        car.impact=Math.max(car.impact,-vn);
+      }
+    }
+  }
+  car.gy=car.y=netY(car.x,car.z);
 }
 function netTick(dt){
   venTick(dt);
@@ -3251,7 +3291,7 @@ function step(dt){
 
   car.vx=vf*s-vl*c;car.vz=vf*c+vl*s;
   car.th-=car.w*dt;
-  car.x+=car.vx*dt;car.z+=car.vz*dt;
+  if(world==='net')netMove(dt);else{car.x+=car.vx*dt;car.z+=car.vz*dt;}
   if(world==='net'&&car.off){var kd=Math.exp(-dt*.4);car.vx*=kd;car.vz*=kd;}   /* fuori strada: erba e terra frenano */
   if(world==='net'&&car.grade){   /* in salita si rallenta, in discesa si accelera; da fermi il freno tiene */
     var held=(car.hb||car.brk>.3)&&Math.abs(car.vx*s+car.vz*c)<1.2;
@@ -3260,7 +3300,7 @@ function step(dt){
 
   s=Math.sin(car.th);c=Math.cos(car.th);
   if(world==='hw'){var pj=hwProj(car.x,car.z,true);car.s=pj.s;car.d=pj.d;}
-  for(var k=0;k<2;k++){
+  for(var k=0;k<(world==='net'?0:2);k++){
     var off=k?-1.35:1.35,h=hitW(car.x+s*off,car.z+c*off,1.05);
     if(!h)continue;
     car.x+=h.nx*h.pen;car.z+=h.nz*h.pen;
@@ -4067,12 +4107,22 @@ function cameraTick(dt){
     var ca=camTh+look.yaw,cs=Math.sin(ca),cc=Math.cos(ca),dist=7.2+Math.min(sp,60)*.035,kf=Math.max(0,Math.cos(look.yaw));
     var cxp=X-cs*dist,czp=Z-cc*dist,h=world==='city'?hit(cxp+OX,czp+OZ,1.2):world==='net'?netHit(cxp+OX,czp+OZ,1.4):null;
     if(h){cxp+=h.nx*h.pen;czp+=h.nz*h.pen;}
-    camera.position.set(cxp,Math.max(world==='net'?netY(cxp+OX,czp+OZ)+1.4:.5,cy+2.7-look.pitch*5),czp);
-    camera.lookAt(X+s*3.5*kf,cy+1.15,Z+c*3.5*kf);
+    var cameraY=Math.max(world==='net'?terrH(cxp+OX,czp+OZ)+1.4:.5,cy+2.7-look.pitch*5);
+    if(world==='net'){
+      var anchorY=cy+1.1,dx=cxp-X,dz=czp-Z,dy=cameraY-anchorY,len=Math.hypot(dx,dy,dz),steps=Math.ceil(len/.35);
+      for(var bi=1;bi<=steps;bi++){
+        var f=bi/steps,wx=car.x+dx*f,wz=car.z+dz*f,wy=anchorY+dy*f;
+        if(netHit(wx,wz,.3,wy)||terrH(wx,wz)+.25>wy){
+          var safe=Math.max(.08,(bi-1)/steps);cxp=X+dx*safe;czp=Z+dz*safe;cameraY=anchorY+dy*safe;break;
+        }
+      }
+    }
+    camera.position.set(cxp,world==='net'?cameraY:Math.max(world==='net'?netY(cxp+OX,czp+OZ)+1.4:.5,cy+2.7-look.pitch*5),czp);
+    camera.lookAt(X+s*3.5*kf,world==='net'?camera.position.y+Math.tan(look.pitch)*dist:cy+1.15,Z+c*3.5*kf);
     camera.fov=(aspect<1?78:60)+Math.min(16,sp*.2);
   }
   if(shake>0){shake-=dt;camera.position.x+=(Math.random()-.5)*shake*.5;camera.position.y+=(Math.random()-.5)*shake*.4;}
-  camera.near=state==='menu'?.3:(camMode===1||WALK.on||BINO.on)?.1:.9;camera.updateProjectionMatrix();
+  camera.near=state==='menu'?.3:(camMode===1||WALK.on||BINO.on)?.1:.15;camera.updateProjectionMatrix();
   skyMesh.position.copy(camera.position);if(sunSpr.visible){var SD2=sunDir();sunSpr.position.set(camera.position.x+SD2.x*1000,camera.position.y+Math.max(SD2.y,-.03)*1000,camera.position.z+SD2.z*1000);}
   if(world!=='city')hwBack.position.set(camera.position.x,world==='net'?car.y:0,camera.position.z);
   skyG.position.y=world==='net'?car.y:0;
@@ -5232,21 +5282,8 @@ function bldInit(){
 function bldHas(tx,tz){return BLD.ready&&BLD.t.has(nk(tx,tz));}
 /* edificio semplice: muri con finestre, tetto a padiglione o piano */
 function nBoxLo(W,F,cx,cz,ux,uz,hw,hd,h,col,roof,u0,y,flat){
-  var vx=-uz,vz=ux,Y=y+h;
-  [[ux,uz,hw,hd],[-ux,-uz,hw,hd],[vx,vz,hd,hw],[-vx,-vz,hd,hw]].forEach(function(f,k){
-    var nx=f[0],nz=f[1],fx=cx+nx*f[2],fz=cz+nz*f[2],rx=nz,rz=-nx,L=f[3]*2,ax=fx-rx*f[3],az=fz-rz*f[3],bx=fx+rx*f[3],bz=fz+rz*f[3],u=u0+k*.25;
-    W.quad([[ax,y,az],[bx,y,bz],[bx,Y,bz],[ax,Y,az]],[nx,0,nz],[[u,0],[u+L/24,0],[u+L/24,h/24],[u,h/24]],col);
-  });
-  function P(a,b,yy){return[cx+ux*a+vx*b,yy,cz+uz*a+vz*b];}
-  if(flat){F.quad([P(-hw,-hd,Y+.05),P(hw,-hd,Y+.05),P(hw,hd,Y+.05),P(-hw,hd,Y+.05)],[0,1,0],N4,HN.flatRoof);
-    [[ux,uz,hw,hd],[-ux,-uz,hw,hd],[vx,vz,hd,hw],[-vx,-vz,hd,hw]].forEach(function(f){var nx=f[0],nz=f[1],d=f[2]+.05,e=f[3]+.05,fx=cx+nx*d,fz=cz+nz*d,rx=nz,rz=-nx;
-      F.quad([[fx-rx*e,Y-.05,fz-rz*e],[fx+rx*e,Y-.05,fz+rz*e],[fx+rx*e,Y+.55,fz+rz*e],[fx-rx*e,Y+.55,fz-rz*e]],[nx,0,nz],N4,HN.eave);});
-    return;}
-  var o=.35,H=Math.min(hd*.55,3.2),r=Math.max(0,hw-hd),a=hw+o,b=hd+o;
-  F.quad([P(-a,b,Y),P(a,b,Y),P(r,0,Y+H),P(-r,0,Y+H)],[vx,.8,vz],N4,roof);
-  F.quad([P(a,-b,Y),P(-a,-b,Y),P(-r,0,Y+H),P(r,0,Y+H)],[-vx,.8,-vz],N4,roof);
-  F.quad([P(a,b,Y),P(a,-b,Y),P(r,0,Y+H),P(r,0,Y+H)],[ux,.8,uz],N4,roof);
-  F.quad([P(-a,-b,Y),P(-a,b,Y),P(-r,0,Y+H),P(-r,0,Y+H)],[-ux,.8,-uz],N4,roof);
+  var len=Math.hypot(ux,uz)||1;ux/=len;uz/=len;
+  nBox(W,F,cx,cz,ux,uz,hw,hd,h,col,roof,u0,y,{kind:flat?'modern':'stone',flat:flat,chimney:!flat});
 }
 
 /* edifici: base sotto il punto più basso del terreno disegnato (niente case sospese) e nessuna sovrapposizione */
@@ -5495,9 +5532,16 @@ function trOn(x,z,r){
 }
 /* quota esatta della superficie del terreno disegnato (griglia di 20 m, due triangoli per quadrato) */
 var trHc=new Map();
-function trCorner(i,j){var k=i*100003+j,v=trHc.get(k);if(v===undefined){v=netGround(i*20,j*20);if(trHc.size>60000)trHc.clear();trHc.set(k,v);}return v;}
+function surfaceCorner(x,z){
+  var h=netGround(x,z),pr=netProbe(x,z);
+  if(pr){var e=NET.E[pr.e];if(!e.br&&!e.tu&&pr.d<e.half+15){
+    var p=pr.p,L=Math.hypot(NET.P.x1[p]-NET.P.x0[p],NET.P.z1[p]-NET.P.z0[p])||1;
+    h=Math.min(h,netRoadY(pr)-.5-Math.abs(NET.P.y1[p]-NET.P.y0[p])/L*15);
+  }}return h;
+}
+function trCorner(i,j){var k=i*100003+j,v=trHc.get(k);if(v===undefined){v=surfaceCorner(i*10,j*10);if(trHc.size>60000)trHc.clear();trHc.set(k,v);}return v;}
 function terrH(x,z){
-  var fx=x/20,fz=z/20,i=Math.floor(fx),j=Math.floor(fz),u=fx-i,v=fz-j,a=trCorner(i,j),b=trCorner(i,j+1),c=trCorner(i+1,j),d=trCorner(i+1,j+1);
+  var fx=x/10,fz=z/10,i=Math.floor(fx),j=Math.floor(fz),u=fx-i,v=fz-j,a=trCorner(i,j),b=trCorner(i,j+1),c=trCorner(i+1,j),d=trCorner(i+1,j+1);
   return u+v<=1?a+(c-a)*u+(b-a)*v:d+(b-d)*(1-u)+(c-d)*(1-v);
 }
 function trPt(t,s){
@@ -6350,11 +6394,11 @@ selM.color=netTerrM.color;
 var SELB=null;
 /* per ogni tassello: il suolo dei centri storici diventa selciato, seguendo esattamente il terreno */
 function selTile(g,ox,oz,townAt){
-  var B=SELB||new GB(),S=20,n=NT/S,i,j,up=[0,1,0],N0=[[0,0],[0,0],[0,0],[0,0]],c0=hc(0xffffff);
+  var B=SELB||new GB(),S=10,n=NT/S,i,j,up=[0,1,0],N0=[[0,0],[0,0],[0,0],[0,0]],c0=hc(0xffffff);
   for(j=0;j<n;j++)for(i=0;i<n;i++){
     var cx=ox+(i+.5)*S,cz=oz+(j+.5)*S,tw=townAt(cx,cz);if(!(tw[0]>.5&&tw[1]>=1))continue;
     var lu=LU.ready?luAt(cx,cz):9;if(lu===1||lu===10)continue;
-    var x0=i*S,z0=j*S,a=[x0,netGround(ox+x0,oz+z0),z0],b=[x0,netGround(ox+x0,oz+z0+S),z0+S],c=[x0+S,netGround(ox+x0+S,oz+z0),z0],d=[x0+S,netGround(ox+x0+S,oz+z0+S),z0+S];
+    var x0=i*S,z0=j*S,a=[x0,surfaceCorner(ox+x0,oz+z0),z0],b=[x0,surfaceCorner(ox+x0,oz+z0+S),z0+S],c=[x0+S,surfaceCorner(ox+x0+S,oz+z0),z0],d=[x0+S,surfaceCorner(ox+x0+S,oz+z0+S),z0+S];
     B.quad([b,d,c,a],up,N0,c0);
   }
   SELB=null;if(!B.i.length)return;
